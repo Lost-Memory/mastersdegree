@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+message: "If you use this dataset or code, please cite it as below."
+title: "Multi-objective supplier selection for rare-earth-oxide production — dataset and code"
+abstract: >-
+  Open dataset (13 inputs x 500 candidate suppliers) and reproducible code for the
+  bi-objective (cost vs. Global Warming Potential) supplier-selection problem for
+  rare-earth-oxide production, in both an unconstrained (separable) and a
+  consolidation-constrained (NP-hard, p-median) regime. Includes a benchmark of
+  metaheuristic, multi-criteria and exact techniques against the exact Pareto front,
+  plus multi-child differential evolution (MO-MCDE, MO-MC-SHADE) and Bayesian
+  algorithm configuration (MO-SMAC) adapted to the multi-objective setting.
+type: dataset
+authors:
+  - family-names: "Crepaldi da Silva"
+    given-names: "Mateus"
+    affiliation: "State University of Maringá (UEM), PPGCC"
+license: "CC-BY-4.0"
+keywords:
+  - "multi-objective optimization"
+  - "sustainable supplier selection"
+  - "rare earth elements"
+  - "Pareto front"
+  - "differential evolution"
+  - "swarm intelligence"
+  - "life cycle assessment"
+  - "p-median problem"
+date-released: "2026-07-21"
+version: "1.0.0"
+doi: "10.5281/zenodo.21481074"
+references:
+  - type: thesis
+    title: >-
+      Otimização Multiobjetivo da Cadeia de Suprimentos de Terras Raras: Uma
+      Abordagem Baseada em Inteligência de Enxame para o Balanço entre Custos e
+      Descarbonização
+    authors:
+      - family-names: "Crepaldi da Silva"
+        given-names: "Mateus"
+    institution:
+      name: "Universidade Estadual de Maringá (UEM) — PPGCC"
+    year: 2026

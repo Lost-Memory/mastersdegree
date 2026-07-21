@@ -1,0 +1,11 @@
+# Análise / métricas (Python 3.12+)
+numpy>=1.26
+pandas>=2.0
+openpyxl>=3.1
+matplotlib>=3.8
+
+# MO-SMAC (opcional — apenas para reproduzir mosmac_reo.py)
+# Requer scikit-learn 1.7.x (versões mais novas quebram a importação do RF do SMAC).
+smac==2.4.0
+scikit-learn==1.7.2
+ConfigSpace>=1.2
