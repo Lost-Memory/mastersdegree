@@ -51,8 +51,21 @@ python analise_v5.py --xlsx Fronteira_Pareto_Global.xlsx \
 ```
 
 ### `analise_k5_run1.py` — restricted-regime metrics (single run)
-Computes the K=5 indicators for the proposed techniques using one run each (fair
+Computes the K=5 indicators for the recent techniques using one run each (fair
 comparison with the published restricted table).
+
+### `testes_significancia.py` — significance tests over the 30 runs
+Consumes `estatistica_out/estatistica_resultados.csv` (produced by
+`Estatistica_REO_V5.m`) and computes, per K: the Friedman omnibus test, the paired
+Wilcoxon signed-rank post-hoc with Holm–Bonferroni correction, and the Nemenyi
+critical-difference ranks. The design is paired because all techniques share the
+same seeds (common random numbers).
+```bash
+python testes_significancia.py
+```
+- Output: `_estatistica_resumo.csv` (median and IQR per technique and K),
+  `_estatistica_friedman.csv`, `_estatistica_pairwise.csv` and the box-plot
+  `fig11_estatistica_boxplot.png`.
 
 ### `mosmac_reo.py` — MO-SMAC (ParEGO variant)
 Runs the Bayesian algorithm-configuration method on the problem (13 categorical

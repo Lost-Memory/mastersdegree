@@ -41,9 +41,7 @@ import numpy as np
 BASE = Path(__file__).resolve().parent
 
 
-# ----------------------------------------------------------------------
 # Dados
-# ----------------------------------------------------------------------
 def carregar_dados():
     """Lê Custos.csv e GWP.csv (separador vírgula, decimal ponto, 1ª col = material)."""
     def ler(nome):
@@ -60,7 +58,6 @@ def carregar_dados():
     mats, C = ler("Custos.csv")
     _, G = ler("GWP.csv")
     assert C.shape == G.shape, "Custos e GWP com dimensões diferentes"
-    # normalização min-max POR MATERIAL (idêntica a Dados_Processo_REO da V4/V5)
     rc = C.max(axis=1) - C.min(axis=1)
     rc[rc == 0] = 1.0
     rg = G.max(axis=1) - G.min(axis=1)
@@ -105,9 +102,7 @@ def avaliar(idx_1based, K):
     return float(MC[linhas, cols].sum()), float(MG[linhas, cols].sum()), idx
 
 
-# ----------------------------------------------------------------------
 # MO-SMAC
-# ----------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n-trials", type=int, default=5000)
@@ -166,9 +161,7 @@ def main():
     if not isinstance(incumbents, list):
         incumbents = [incumbents]
 
-    # ------------------------------------------------------------------
     # Extrai TODAS as avaliações do runhistory e monta a frente global
-    # ------------------------------------------------------------------
     rh = smac.runhistory
     evals = []  # (custo, gwp, x_reparado)
     for tk, tv in rh.items():
@@ -189,7 +182,6 @@ def main():
         else:
             nd[j] = False
     # correção para empates exatos de custo: manter apenas o de menor gwp
-    # (a varredura acima já garante isso, pois ordena por (custo, gwp))
 
     inc_set = set()
     for cfg in incumbents:

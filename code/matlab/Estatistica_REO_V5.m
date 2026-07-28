@@ -1,38 +1,23 @@
 function Estatistica_REO_V5
-% =====================================================================
-%  Estatistica_REO_V5 — EXPERIMENTO DE VALIDAÇÃO ESTATÍSTICA
-% =====================================================================
-%  Roda as técnicas ESTOCÁSTICAS principais NSEEDS vezes (sementes fixas
-%  e reprodutíveis) para cada valor de K, guardando a frente de Pareto
-%  final de CADA execução. As métricas (HV/IGD) e os testes estatísticos
-%  (Wilcoxon/Friedman) são calculados depois, em Python, sobre estas saídas.
+% Estatistica_REO_V5
 %
-%  POR QUE ESTE ARQUIVO SEPARADO
-%   - O Master_Optimizer roda as 17 técnicas de uma vez; com 14 núcleos
-%     isso satura o pool e trava. Aqui roda-se UMA técnica por vez, com as
-%     30 sementes em parfor sobre um pool LIMITADO -> memória previsível,
-%     sem travamento.
-%   - Usa DOMINÂNCIA VETORIZADA (10-50x mais rápida que a O(n^2); idêntica
-%     em resultado — verificada por auto-teste no início). É o que torna
-%     viável rodar ~900 execuções.
-%   - RESUMÍVEL: cada par (K, técnica) vira um checkpoint .mat. Pode fechar
-%     o MATLAB e reabrir; ao rodar de novo, ele PULA o que já terminou.
+% Harness de validacao estatistica do benchmark. Executa as cinco tecnicas
+% estocasticas principais (MO-MC-SHADE, MO-MCDE, NSGA-II, MOEA/D-AV e MOPSO) em 30
+% repeticoes independentes, com sementes fixas, para cada K em {2, 5, 13},
+% registrando a frente de Pareto final de cada execucao.
 %
-%  COMO RODAR (fire-and-forget)
-%   1. Abra o MATLAB nesta pasta (com Custos.csv e GWP.csv ao lado).
-%   2. Comando:  >> Estatistica_REO_V5
-%   3. Deixe rodar. Ao terminar, a pasta estatistica_out/ terá:
-%        - ck_K*_*.mat            (checkpoints por par K×técnica)
-%        - estatistica_resultados.csv  (frentes de todas as execuções)
-%        - estatistica_log.txt    (diário da execução, com ETA)
+% Resumivel: cada par (K, tecnica) e gravado como checkpoint .mat em
+% estatistica_out/; reexecutar pula os pares ja concluidos.
 %
-%  AJUSTES por variável de ambiente (para TESTE, sem editar o arquivo):
-%     set ESTAT_NSEEDS=3        %% menos sementes
-%     set ESTAT_KLIST=13        %% só K=13 (irrestrito)
-%     set ESTAT_TECHS=NSGA2     %% só uma técnica
-%     set ESTAT_MAXIT=100       %% MaxIt reduzido (NUNCA no experimento final)
-%  (no experimento definitivo, NÃO defina nenhuma dessas variáveis.)
-% =====================================================================
+% As rotinas de dominancia e de ordenacao por nao-dominancia sao vetorizadas, com
+% auto-teste que confere a identidade dos resultados com as versoes O(n^2) originais.
+%
+% Entrada: Custos.csv e GWP.csv no diretorio corrente.
+% Saida  : estatistica_out/estatistica_resultados.csv, uma linha por solucao
+%          (K, Algoritmo, Rep, Custo_Total, Impacto_Ambiental, Tempo_Total_Segundos).
+%
+% Sobrescritas apenas para teste (nao usar na execucao final): ESTAT_NSEEDS,
+% ESTAT_KLIST, ESTAT_TECHS, ESTAT_MAXIT.
 clc;
 
 %% ---------------- Configuração ----------------
@@ -110,9 +95,7 @@ fprintf('\n=== CONCLUIDO === resultados em: %s\n', OUTDIR);
 diary off;
 end
 
-% =====================================================================
 %   Infra do experimento
-% =====================================================================
 function [rep, tt] = run_tech(tech, d, par, dq)
 % Despacho por nome (parfor exige função, não handle de campo de struct).
 switch tech
@@ -134,9 +117,6 @@ end
 
 function selftest_domination()
 % Confirma que as rotinas VETORIZADAS (usadas aqui) são idênticas às O(n^2)
-% originais do Master_Optimizer. Se divergir, ABORTA (não vale rodar um
-% experimento longo com uma rotina incorreta). Testa dois cenários: custos
-% contínuos (sem empates) e custos inteiros (COM empates, como no dado real).
 rng(12345, 'twister');
 for caso = 1:2
     n = 300; pop = repmat(struct('Cost', [], 'IsDominated', false, 'Rank', []), n, 1);
@@ -190,11 +170,7 @@ function v = getenvcell(name, def)
 s = getenv(name); if isempty(s), v = def; else, v = strtrim(strsplit(s, ',')); end
 end
 
-% =====================================================================
 %   Dominância VETORIZADA (10-50x mais rápida; substitui a O(n^2)).
-%   A O(n^2) original está preservada como DetermineDomination_ref para
-%   o auto-teste de equivalência.
-% =====================================================================
 function pop = DetermineDomination(pop)
 n = numel(pop);
 for i = 1:n, pop(i).IsDominated = false; end
@@ -208,15 +184,7 @@ for i = 1:n
 end
 end
 
-% =====================================================================
 %   Ordenação por não-dominância VETORIZADA (fronts do NSGA-II).
-%   Substitui a NonDominatedSort O(n^2) (o real gargalo do NSGA-II e das
-%   variantes multi-child, que também a usam na seleção ambiental).
-%   Produz RANKS idênticos aos da versão O(n^2) (preservada como
-%   NonDominatedSort_ref para o auto-teste). Complexidade: uma matriz de
-%   dominância n x n construída em O(n^2) mas VETORIZADA (sem acesso a
-%   struct em laço duplo), seguida de peeling de fronts sobre vetores.
-% =====================================================================
 function pop = NonDominatedSort(pop)
 n = numel(pop);
 if n == 0, return; end
@@ -241,15 +209,10 @@ end
 for i = 1:n, pop(i).Rank = rank(i); end
 end
 
-% =====================================================================
 %   Funções de técnica e auxiliares — EXTRAÍDAS VERBATIM do
-%   Master_Optimizer_REO_V5_MC.m (garante fidelidade ao benchmark).
-% =====================================================================
 
 function [repValido, tempo_execucao] = RunNSGA2(dados, params, dq)
 % NSGA-II — ordenação por não-dominância (fronts) + distância de aglomeração
-% (crowding) para diversidade. Seleção por torneio, cruzamento uniforme e
-% mutação; elitismo via combinação pais+filhos e truncamento por (rank, crowding).
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar];
     empty.Position = []; empty.Cost = []; empty.IsDominated = false; empty.Rank = []; empty.CrowdingDistance = []; pop = repmat(empty, params.nPop, 1);
     for i = 1:params.nPop, pop(i).Position = round(unifrnd(VarMin, VarMax, VarSize)); pop(i).Cost = CostFunction(pop(i).Position, dados); end
@@ -275,9 +238,6 @@ end
 
 function [repValido, tempo_execucao] = RunMOPSO(dados, params, dq)
 % MOPSO — Multi-Objective Particle Swarm Optimization com GRADE ADAPTATIVA.
-% Mantém um repositório externo (rep) de soluções não-dominadas; o líder de
-% cada partícula é sorteado de regiões POUCO povoadas da grade (preserva
-% diversidade ao longo da frente). Mutação/turbulência evita ótimos locais.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar];
     % Estrutura de uma partícula (posição, velocidade, custo, melhor pessoal e índices de grade).
     empty.Position = []; empty.Velocity = []; empty.Cost = []; empty.Best.Position = []; empty.Best.Cost = []; empty.IsDominated = false; empty.GridIndex = []; empty.GridSubIndex = [];
@@ -296,8 +256,6 @@ function [repValido, tempo_execucao] = RunMOPSO(dados, params, dq)
             % Atualização clássica de velocidade: inércia + componente cognitivo + social.
             pop(i).Velocity = w_atual * pop(i).Velocity + params.c1 * rand(VarSize) .* (pop(i).Best.Position - pop(i).Position) + params.c2 * rand(VarSize) .* (leader.Position - pop(i).Position);
             % MELHORIA SUGERIDA (Vmax) — evita explosão de velocidade com w=1,0:
-            %   Vmax = 0.2*(VarMax-VarMin); pop(i).Velocity = max(min(pop(i).Velocity, Vmax), -Vmax);
-            % (desativada para não alterar os resultados já validados; ative se notar instabilidade)
             pop(i).Position = min(max(pop(i).Position + pop(i).Velocity, VarMin), VarMax); pop(i).Cost = CostFunction(pop(i).Position, dados);
             % Operador de mutação/turbulência (aceita por dominância).
             if rand < pm
@@ -313,7 +271,6 @@ function [repValido, tempo_execucao] = RunMOPSO(dados, params, dq)
         if k > 0, rep(repCount+1:repCount+k) = novos(1:k); repCount = repCount + k; end
         tmp = rep(1:repCount); tmp = DetermineDomination(tmp); tmp = tmp(~[tmp.IsDominated]); rep(1:numel(tmp)) = tmp; repCount = numel(tmp);
         % [CORRIGIDO] agora recebe 'rep' de volta — a poda por densidade de
-        % grade realmente altera o repositório (ver nota em DeleteOneRepMember).
         while repCount > params.nRep, [rep, repCount] = DeleteOneRepMember(rep, repCount, 2); end
         Grid = CreateGrid(rep, repCount, 7, 0.1); for i = 1:repCount, rep(i) = FindGridIndex(rep(i), Grid); end
         w_atual = w_atual * params.wdamp;   % decaimento da inércia
@@ -327,7 +284,6 @@ end
 
 function [repValido, tempo_execucao] = RunMOEAD_AV(dados, params, dq)
 % MOEA/D-AV — variante com população ADAPTATIVA (Adaptive Volume): N cresce
-% se o arquivo está rico e encolhe se está pobre, recalculando pesos/vizinhança.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar]; nObj = 2; N = params.nPopInit; W = zeros(N, nObj);
     for i = 1:N, W(i, 1) = (i-1)/(N-1); W(i, 2) = 1 - W(i, 1); end; T = min(params.T, N); sp = struct('V', [], 'Neighbors', []); sp = repmat(sp, N, 1);
     for i = 1:N, D = pdist2(W(i,:), W); [~, idx] = sort(D); sp(i).Neighbors = idx(1:T); end; empty_ind.Position = []; empty_ind.Cost = []; empty_ind.IsDominated = false; pop = repmat(empty_ind, N, 1); z = inf(nObj, 1);
@@ -357,13 +313,6 @@ end
 
 function [repValido, tempo_execucao] = RunMO_MCDE(dados, params, dq)
 % MO-MCDE â€” Multi-Child DE multiobjetivo.
-% NÃºcleo MCDE preservado (eqs. 1-5 do paper CEC 2026):
-%   - mutaÃ§Ã£o DE/rand/1 com r0/r1/r2 SORTEADOS POR FILHO;
-%   - dithering de F por competiÃ§Ã£o pai-filhos (eq. 2):
-%       F_i = F_L + rand*(F_U - F_L), F_L=0,3, F_U=1,6;
-%   - crossover binomial com Cr fixo (0,85) e j_rand (eq. 3);
-%   - M filhos por pai; prÃ©-seleÃ§Ã£o -> campeÃ£o w_i (eq. 4);
-%   - seleÃ§Ã£o final pai x campeÃ£o (eq. 5), aqui por dominÃ¢ncia.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar];
     N = params.nPop; M = params.M;
     empty.Position = []; empty.Cost = []; empty.IsDominated = false; empty.Rank = []; empty.CrowdingDistance = [];
@@ -399,7 +348,6 @@ function [repValido, tempo_execucao] = RunMO_MCDE(dados, params, dq)
         pool_ = NonDominatedSort(pool_); pool_ = CalcCrowdingDistance(pool_);
         pop = SortAndTruncateNSGA2(pool_, N);
         % repositÃ³rio: basta inserir os rank-1 da geraÃ§Ã£o (os demais seriam
-        % filtrados de qualquer forma dentro de UpdateRepositorio)
         rep = UpdateRepositorio(rep, pool_([pool_.Rank] == 1), params.nRep);
         if mod(it, 50) == 0 || it == params.MaxIt
             send(dq, sprintf('MO-MCDE    : Iter %4d / %d concluida (rep = %d)', it, params.MaxIt, numel(rep)));
@@ -410,21 +358,6 @@ end
 
 function [repValido, tempo_execucao] = RunMO_MCSHADE(dados, params, dq)
 % MO-MC-SHADE â€” Multi-Child SHADE multiobjetivo.
-% NÃºcleo MC-SHADE preservado (eqs. 6-14 do paper CEC 2026):
-%   - mutaÃ§Ã£o DE/current-to-pbest (eq. 6): v = x_i + F*(x_pbest - x_i + x_r1 - x_r2),
-%     com x_pbest sorteado entre os p melhores da geraÃ§Ã£o anterior,
-%     p ~ U{2, floor(0,2N)}, mantido para os M filhos do mesmo pai;
-%   - Cr_i ~ Normal(mu_Cr, 0,1) e F_i ~ Cauchy(mu_F, 0,1) POR COMPETIÃ‡ÃƒO (eq. 8);
-%   - buffer circular de tamanho H = N/3 (anel), inicializado em 0,5; a cada
-%     geraÃ§Ã£o um slot aleatÃ³rio fornece (mu_Cr, mu_F) e o slot corrente do
-%     anel recebe a atualizaÃ§Ã£o:
-%       mu_Cr novo = mu_Cr*(1-c) + c * [mÃ©dia aritmÃ©tica de Cr ponderada por delta] (eqs. 9-10)
-%       mu_F  novo = mu_F *(1-c) + c * [mÃ©dia de Lehmer quadrÃ¡tica dos F de sucesso] (eqs. 12-13)
-%     com c = 0,1 e delta_i pela regra de Peng (eq. 11);
-%   - SEM archive externo de derrotados (fiel ao MC-SHADE original);
-%   - tratamento de borda padrÃ£o SHADE: ponto mÃ©dio entre o limite e o pai.
-% AdaptaÃ§Ã£o multiobjetivo: "p melhores" = ordenaÃ§Ã£o (rank, crowding);
-% sucesso = campeÃ£o domina o pai; delta_i = norma da melhoria normalizada.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar];
     N = params.nPop; M = params.M; H = max(2, params.H); c = params.c;
     empty.Position = []; empty.Cost = []; empty.IsDominated = false; empty.Rank = []; empty.CrowdingDistance = [];
@@ -490,11 +423,6 @@ end
 
 function z = CostFunction(x, dados)
 % Avalia os dois objetivos de uma solução x (vetor de índices de fornecedor
-% por material). Passos:
-%   1) Discretiza x para inteiros válidos em [1, nForn] (PSO opera contínuo).
-%   2) [NOVO] Se a restrição K está ativa, REPARA para <= K fornecedores
-%      distintos (reparo Baldwiniano: vale para todas as técnicas).
-%   3) Soma o custo e o GWP do fornecedor escolhido de cada material.
     idx_fornecedores = max(1, min(round(x), dados.nFornecedores));
     if isfield(dados,'K') && ~isempty(dados.K) && dados.K < dados.nVar
         idx_fornecedores = ApplyK(idx_fornecedores, dados);
@@ -505,15 +433,7 @@ function z = CostFunction(x, dados)
 end
 
 function idx = ApplyK(idx, dados)
-% [NOVO] Operador de REPARO da restrição de consolidação: reduz o número de
 % fornecedores DISTINTOS em 'idx' para no máximo dados.K.
-% Heurística (gulosa e determinística):
-%   enquanto há mais de K fornecedores distintos:
-%     - identifica o fornecedor MENOS usado (candidato a ser eliminado);
-%     - reatribui cada material que o usava ao fornecedor REMANESCENTE de
-%       menor custo+GWP NORMALIZADOS para aquele material (Cn+Gn).
-% Motivo da normalização: custo (~10^2-10^3) e GWP (~10^0) têm escalas muito
-% diferentes; normalizar por material evita que o custo domine a reatribuição.
     K = dados.K;
     u = unique(idx);
     while numel(u) > K
@@ -528,16 +448,10 @@ function idx = ApplyK(idx, dados)
         u = unique(idx);
     end
     % NOTA: este é o reparo "Baldwiniano" (usado na AVALIAÇÃO). Para a variante
-    % "Lamarckiana" (escrever o reparo de volta no genótipo, melhor convergência),
-    % chamar ApplyK também após cada atualização de posição dentro das técnicas.
 end
 
 function dados = Dados_Processo_REO()
 % Lê Custos.csv e GWP.csv (formato: 1ª coluna = nome do material; demais =
-% fornecedores). Converte vírgula decimal para ponto, descarta linhas com
-% valores inválidos (NaN) e monta a struct 'dados'.
-% [NOVO] Calcula também Cn/Gn (matrizes normalizadas por material em [0,1]),
-% usadas pelo operador de reparo ApplyK.
     opts = detectImportOptions('Custos.csv'); opts.VariableNamingRule = 'preserve'; opts = setvartype(opts, opts.VariableNames(2:end), 'string'); tabCusto = readtable('Custos.csv', opts);
     if ~isfile('GWP.csv'), error('GWP.csv nao encontrado.'); end
     optsGWP = detectImportOptions('GWP.csv'); optsGWP.VariableNamingRule = 'preserve'; optsGWP = setvartype(optsGWP, optsGWP.VariableNames(2:end), 'string'); tabGWP = readtable('GWP.csv', optsGWP);
@@ -554,14 +468,12 @@ end
 
 function b = Dominates(a, b_)
 % Dominância de Pareto (minimização): 'a' domina 'b_' se é <= em todos os
-% objetivos e < em pelo menos um. Aceita structs (usa .Cost) ou vetores.
     if isstruct(a), a = a.Cost; end; if isstruct(b_), b_ = b_.Cost; end
     b = all(all(a <= b_)) && any(any(a < b_));
 end
 
 function pop = DetermineDomination_ref(pop)
 % Marca pop(i).IsDominated = true se existe alguma outra solução que o domina.
-% Complexidade O(n^2) com acesso a structs — é o principal gargalo de tempo.
     n = numel(pop); for i = 1:n, pop(i).IsDominated = false; end
     for i = 1:n-1
         for j = i+1:n
@@ -573,7 +485,6 @@ end
 
 function pop = NonDominatedSort_ref(pop)
 % Ordenação rápida por não-dominância (fast non-dominated sort do NSGA-II):
-% atribui pop(i).Rank = nº do front (1 = melhor). Base do elitismo do NSGA-II.
     n = numel(pop); domCount = zeros(n,1); dominatedSet = cell(n,1);
     for i = 1:n
         for j = i+1:n, if Dominates(pop(i), pop(j)), dominatedSet{i} = [dominatedSet{i}, j]; domCount(j) = domCount(j) + 1; elseif Dominates(pop(j), pop(i)), dominatedSet{j} = [dominatedSet{j}, i]; domCount(i) = domCount(i) + 1; end; end
@@ -587,7 +498,6 @@ end
 
 function pop = CalcCrowdingDistance(pop)
 % Distância de aglomeração (crowding) por front: mede o "espaço" ao redor de
-% cada solução; extremos recebem inf. Preserva diversidade no NSGA-II.
     n = numel(pop); nObj = numel(pop(1).Cost); for i = 1:n, pop(i).CrowdingDistance = 0; end; maxRank = max([pop.Rank]);
     for r = 1:maxRank
         F = find([pop.Rank] == r); l = numel(F); if l == 0, continue; end
@@ -603,20 +513,17 @@ end
 
 function popNew = SortAndTruncateNSGA2(pop, nPop)
 % Seleção ambiental do NSGA-II: ordena por (Rank crescente, Crowding
-% decrescente) e mantém os nPop melhores.
     ranks = [pop.Rank]; cds = [pop.CrowdingDistance]; [~, order] = sortrows([ranks', -cds']); popNew = pop(order(1:nPop));
 end
 
 function idx = TournamentSelection(pop)
 % Torneio binário: sorteia 2 indivíduos e vence o de menor rank (desempate
-% pela maior distância de aglomeração).
     n = numel(pop); i1 = randi(n); i2 = randi(n);
     if pop(i1).Rank < pop(i2).Rank, idx = i1; elseif pop(i2).Rank < pop(i1).Rank, idx = i2; else, if pop(i1).CrowdingDistance > pop(i2).CrowdingDistance, idx = i1; else, idx = i2; end; end
 end
 
 function xnew = Mutate(x, pm, VarMin, VarMax)
 % Mutação: perturba UMA variável aleatória dentro de uma janela proporcional
-% a pm (amplitude da perturbação). Mantém a solução no domínio.
     j = randi(numel(x)); dx = pm*(VarMax-VarMin); lb = max(VarMin, x(j)-dx); ub = min(VarMax, x(j)+dx); xnew = x; xnew(j) = unifrnd(lb, ub);
 end
 
@@ -627,7 +534,6 @@ end
 
 function part = FindGridIndex(part, Grid)
 % Mapeia uma solução do repositório para uma célula da grade adaptativa
-% (índice de hipercubo no espaço de objetivos). Usado pelo MOPSO.
     nObj = numel(part.Cost); nGrid = numel(Grid(1).LB); part.GridSubIndex = zeros(1, nObj);
     for j = 1:nObj, val = part.Cost(j); if isnan(val), idx = nGrid; else, idx = find(val < Grid(j).UB, 1, 'first'); if isempty(idx), idx = numel(Grid(j).UB); end; end; part.GridSubIndex(j) = idx; end
     part.GridIndex = part.GridSubIndex(1); for j = 2:nObj, part.GridIndex = nGrid*(part.GridIndex-1) + part.GridSubIndex(j); end
@@ -635,8 +541,6 @@ end
 
 function leader = SelectLeader(rep, repCount, beta)
 % Seleciona o líder global do MOPSO: células MENOS povoadas têm MAIOR
-% probabilidade (P ~ exp(-beta*N)), empurrando o enxame para regiões esparsas
-% da frente (promove diversidade/cobertura).
     GI = [rep(1:repCount).GridIndex]; OC = unique(GI); N = zeros(size(OC)); for k = 1:numel(OC), N(k) = sum(GI == OC(k)); end
     P = exp(-beta*N); P = P./sum(P); sci = RouletteWheelSelection(P); if isempty(sci), sci = randi(numel(OC)); end
     sc = OC(sci); SCM = find(GI == sc); leader = rep(SCM(randi(numel(SCM))));
@@ -644,17 +548,6 @@ end
 
 function [rep, repCount] = DeleteOneRepMember(rep, repCount, gamma)
 % Poda do repositório quando excede a capacidade: células MAIS povoadas têm
-% MAIOR probabilidade de perder um membro (P ~ exp(gamma*(N-max))), mantendo
-% a frente uniforme.
-%
-% [BUG CORRIGIDO NA V4] Na V3 a assinatura era "function repCount = ...": como
-% o MATLAB passa arrays POR VALOR, a remoção "rep(remIdx) = rep(repCount)" era
-% feita numa CÓPIA local e PERDIDA ao retornar (só repCount voltava). O efeito
-% real era apenas truncar o último elemento — a poda por densidade de grade
-% descrita na metodologia (Seção 3.1.4.3) NÃO acontecia. Agora 'rep' também é
-% retornado, fazendo a poda funcionar como documentado.
-% Para reproduzir EXATAMENTE o comportamento da V3, reverta a assinatura para
-% "function repCount = ..." e o chamador no MOPSO para "repCount = DeleteOne...".
     GI = [rep(1:repCount).GridIndex]; OC = unique(GI); N = zeros(size(OC)); for k = 1:numel(OC), N(k) = sum(GI == OC(k)); end
     P = exp(gamma*(N-max(N))); P = P./sum(P); sci = RouletteWheelSelection(P); if isempty(sci), sci = randi(numel(OC)); end
     sc = OC(sci); SCM = find(GI == sc); remIdx = SCM(randi(numel(SCM)));
@@ -664,8 +557,6 @@ end
 
 function Grid = CreateGrid(pop, repCount, nGrid, alpha)
 % Cria a grade adaptativa no espaço de objetivos: divide cada eixo em nGrid
-% faixas, com folga 'alpha' nas bordas. Recalculada a cada iteração conforme
-% a frente evolui (por isso "adaptativa").
     if repCount == 0, Grid = repmat(struct('LB', [-inf 0], 'UB', [0 inf]), 2, 1); return; end
     nObj = numel(pop(1).Cost); c = reshape([pop(1:repCount).Cost], nObj, []); c(isnan(c)) = max(c(~isnan(c)));
     cmin = min(c, [], 2); cmax = max(c, [], 2); dc = cmax-cmin; cmin = cmin-alpha*dc; cmax = cmax+alpha*dc;
@@ -675,10 +566,6 @@ end
 
 function w = PreSelecaoMO(filhos, pai)
 % PrÃ©-seleÃ§Ã£o multiobjetivo do multi-child: devolve UM campeÃ£o entre os M
-% filhos (equivalente Pareto do argmin da eq. 4):
-%   1) se algum filho DOMINA o pai, sorteia entre os que dominam o pai e
-%      sÃ£o nÃ£o-dominados entre si (maior pressÃ£o seletiva rumo Ã  frente);
-%   2) senÃ£o, sorteia entre os filhos nÃ£o-dominados entre si.
     Mloc = numel(filhos);
     domPai = false(Mloc, 1);
     for m = 1:Mloc, domPai(m) = Dominates(filhos(m).Cost, pai.Cost); end
@@ -708,10 +595,6 @@ end
 
 function rep = UpdateRepositorio(rep, novos, nRep)
 % RepositÃ³rio externo de nÃ£o-dominados (a frente devolvida no final):
-% junta, refiltra por dominÃ¢ncia, deduplica em (custo, GWP) e, se exceder a
-% capacidade, poda os de MENOR crowding (preserva cobertura da frente).
-% Poda determinÃ­stica por crowding â€” anÃ¡loga em intenÃ§Ã£o Ã  poda por grade do
-% MOPSO, reutilizando CalcCrowdingDistance.
     rep = [rep; novos];
     if isempty(rep), return; end
     rep = DetermineDomination(rep); rep = rep(~[rep.IsDominated]);

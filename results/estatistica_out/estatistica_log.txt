@@ -1,0 +1,25 @@
+=== Estatistica_REO_V5 ===
+30 sementes | K = [2 5 13] | tecnicas: MO_MCSHADE,MO_MCDE,NSGA2,MOEAD_AV,MOPSO
+Lendo Custos.csv / GWP.csv...
+Auto-teste (DetermineDomination + NonDominatedSort, com e sem empates): OK.
+Starting parallel pool (parpool) using the 'local' profile ...
+Connected to the parallel pool (number of workers: 12).
+Pool com 12 workers.
+==> K= 2  MO_MCSHADE   rodando 30 sementes ... 2187 s | mediana N_nd = 37 | ETA restante ~ 8.5 h
+==> K= 2  MO_MCDE      rodando 30 sementes ... 1910 s | mediana N_nd = 17 | ETA restante ~ 7.4 h
+==> K= 2  NSGA2        rodando 30 sementes ... 2188 s | mediana N_nd = 500 | ETA restante ~ 7.0 h
+==> K= 2  MOEAD_AV     rodando 30 sementes ... 2626 s | mediana N_nd = 22 | ETA restante ~ 6.8 h
+==> K= 2  MOPSO        rodando 30 sementes ... 3765 s | mediana N_nd = 500 | ETA restante ~ 7.0 h
+==> K= 5  MO_MCSHADE   rodando 30 sementes ... 1813 s | mediana N_nd = 87 | ETA restante ~ 6.0 h
+==> K= 5  MO_MCDE      rodando 30 sementes ... 1268 s | mediana N_nd = 32 | ETA restante ~ 5.0 h
+==> K= 5  NSGA2        rodando 30 sementes ... 1663 s | mediana N_nd = 500 | ETA restante ~ 4.2 h
+==> K= 5  MOEAD_AV     rodando 30 sementes ... 1797 s | mediana N_nd = 81 | ETA restante ~ 3.6 h
+==> K= 5  MOPSO        rodando 30 sementes ... 2255 s | mediana N_nd = 190 | ETA restante ~ 3.0 h
+==> K=13  MO_MCSHADE   rodando 30 sementes ... 225 s | mediana N_nd = 236 | ETA restante ~ 2.2 h
+==> K=13  MO_MCDE      rodando 30 sementes ... 181 s | mediana N_nd = 45 | ETA restante ~ 1.5 h
+==> K=13  NSGA2        rodando 30 sementes ... 299 s | mediana N_nd = 500 | ETA restante ~ 0.9 h
+==> K=13  MOEAD_AV     rodando 30 sementes ... 351 s | mediana N_nd = 426 | ETA restante ~ 0.4 h
+==> K=13  MOPSO        rodando 30 sementes ... 375 s | mediana N_nd = 110 | ETA restante ~ 0.0 h
+CSV consolidado: 15 checkpoints, 98939 linhas -> estatistica_resultados.csv
+
+=== CONCLUIDO === resultados em: C:\Users\engmc\dissertacao_runs\estatistica_out

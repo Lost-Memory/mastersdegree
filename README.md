@@ -24,8 +24,8 @@ and the **total Global Warming Potential** (GWP, kg CO₂-eq). Two regimes are s
 
 - **Unconstrained (separable):** each input's supplier is chosen independently. The
   exact Pareto front is obtained by decomposition (Minkowski sum of per-input local
-  fronts with dominance pruning): **1918 non-dominated solutions**, cost ∈ [635.39,
-  7155.25], GWP ∈ [2.5956, 4.7994].
+  fronts with dominance pruning — the *Pareto sum* operation): **1918 non-dominated
+  solutions**, cost ∈ [635.39, 7155.25], GWP ∈ [2.5956, 4.7994].
 - **Consolidation-constrained (NP-hard):** at most **K** distinct suppliers are
   allowed in the whole chain (a bi-objective *p*-median variant). Runs for
   K ∈ {2, 3, 5, 8, 10, 13} are provided.
@@ -33,9 +33,15 @@ and the **total Global Warming Potential** (GWP, kg CO₂-eq). Two regimes are s
 A broad set of techniques is benchmarked against the exact front — metaheuristics
 (MOPSO, NSGA-II, MOGA, MOEA/D and variants, SI-CDC), multi-criteria methods (AHP,
 PROMETHEE, ELECTRE), exact/deterministic methods (MILP *p*-median, branch-and-bound,
-Lagrangian relaxation, lexicographic), plus three recent techniques adapted here to
-the multi-objective setting: **MO-MCDE** and **MO-MC-SHADE** (multi-child
-differential evolution) and **MO-SMAC-PE** (Bayesian algorithm configuration).
+Lagrangian relaxation, lexicographic), plus three recent techniques: multi-child
+differential evolution in multi-objective form (**MO-MCDE**, **MO-MC-SHADE**) and
+multi-objective Bayesian algorithm configuration (**MO-SMAC-PE**).
+
+All techniques are the work of their original authors. MCDE and MC-SHADE (Storn) are
+single-objective optimisers, run here in multi-objective form by replacing the scalar
+parent–child selection with GDE3-style Pareto-dominance selection (Kukkonen &
+Lampinen, 2005); MO-SMAC is multi-objective by design (Rook et al.) and is used here
+as a direct solver rather than in its native algorithm-configuration role.
 
 ## Repository structure
 
@@ -45,10 +51,11 @@ differential evolution) and **MO-SMAC-PE** (Bayesian algorithm configuration).
 │   └── DATA_DICTIONARY.md
 ├── code/
 │   ├── matlab/    Optimisers (benchmark + statistical-validation harness)
-│   ├── python/    Metrics, exact front, and the MO-SMAC run
+│   ├── python/    Metrics, exact front, MO-SMAC run, significance tests
 │   └── README.md  How to run each script
-├── results/       Pareto fronts and quality-indicator tables produced by the code
-├── figures/       Selected figures of the proposed algorithms
+├── results/       Pareto fronts and quality-indicator tables
+│   └── estatistica_out/   30-run statistical study (raw data + summaries)
+├── figures/       Figures of the recent techniques and of the statistical study
 ├── LICENSE        MIT (code)
 ├── LICENSE-DATA.md  CC BY 4.0 (data)
 └── CITATION.cff   Citation metadata
@@ -80,28 +87,51 @@ and requires a separate license.
 
 1. **Benchmark (both regimes)** — MATLAB (Parallel Computing, Optimization and
    Statistics toolboxes). Place `Custos.csv` and `GWP.csv` next to the script and run
-   `code/matlab/Master_Optimizer_REO_V5_MC.m`. The constraint knob `K_MAX` (line ~55)
-   selects the regime; sweep K to reproduce the restricted runs. Output:
+   `code/matlab/Master_Optimizer_REO_V5_MC.m`. The constraint knob `K_MAX` selects
+   the regime; sweep K to reproduce the restricted runs. Output:
    `Fronteira_Pareto_Global*.xlsx`.
 2. **Statistical validation** — run `code/matlab/Estatistica_REO_V5.m`; it executes
-   the main stochastic techniques 30× per seed for K ∈ {2, 5, 13}, resumable via
-   per-checkpoint `.mat` files, and writes `estatistica_out/estatistica_resultados.csv`.
+   the five main stochastic techniques 30× (fixed seeds) for K ∈ {2, 5, 13},
+   resumable via per-checkpoint `.mat` files, and writes
+   `estatistica_out/estatistica_resultados.csv`.
 3. **Metrics and exact front** — Python 3.12+ (`pip install -r
    code/python/requirements.txt`). Run `code/python/analise_v5.py` to recompute the
    exact front (by decomposition) and the HV/IGD/GD/purity indicators against it.
-4. **MO-SMAC** — `code/python/mosmac_reo.py` (uses the official `smac` package,
+4. **Significance tests** — `code/python/testes_significancia.py` consumes the CSV
+   from step 2 and produces the Friedman / paired-Wilcoxon (Holm–Bonferroni) results
+   and the box-plot figure.
+5. **MO-SMAC** — `code/python/mosmac_reo.py` (uses the official `smac` package,
    ParEGO variant).
 
 See `code/README.md` for command-line details.
 
-## Results (this release)
+## Results in this release
 
-Base-regime quality indicators (hypervolume as a fraction of the exact HV) are in
-`results/_metricas_v5.csv`; the restricted K=5 indicators in
-`results/_metricas_k5_run1.csv`. The single-run benchmark tables of the dissertation
-are reproduced here; the multi-seed statistical-significance study (Wilcoxon /
-Friedman–Nemenyi with Holm–Bonferroni correction) is produced by the harness in
-step 2.
+**Single-run benchmark.** Base-regime quality indicators (hypervolume as a fraction
+of the exact HV) are in `results/_metricas_v5.csv`; the restricted K = 5 indicators in
+`results/_metricas_k5_run1.csv`. Pareto fronts are in `results/Fronteira_Pareto_*`.
+
+**30-run statistical study** (`results/estatistica_out/`): five stochastic techniques
+× 30 independent seeds × K ∈ {2, 5, 13}. Median hypervolume, as a fraction of the
+exact front:
+
+| Technique | K = 2 | K = 5 | K = 13 |
+|---|---|---|---|
+| **MO-MC-SHADE** | **0.9311** | **0.9836** | **0.9923** |
+| NSGA-II | 0.9270 | 0.9756 | 0.9833 |
+| MOPSO | 0.9299 | 0.9686 | 0.9818 |
+| MO-MCDE | 0.9232 | 0.9645 | 0.9806 |
+| MOEA/D-AV | 0.9219 | 0.9513 | 0.9639 |
+
+Friedman rejects equality of the techniques at every K (p = 7.6e-20, 1.6e-17,
+3.0e-13). Paired Wilcoxon with Holm–Bonferroni correction confirms that
+**MO-MC-SHADE is significantly better than every other technique** at every K.
+Notably, MOEA/D-AV — the leader of the single-run benchmark — shows the largest
+variance and the worst mean rank under replication, i.e. its first place was an
+artefact of one favourable run. Raw per-solution data are in
+`estatistica_resultados.csv`; summaries in `_estatistica_resumo.csv`,
+`_estatistica_friedman.csv` and `_estatistica_pairwise.csv`; the distribution plot is
+`figures/fig11_estatistica_boxplot.png`.
 
 ## How to cite
 

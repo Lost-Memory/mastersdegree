@@ -1,82 +1,35 @@
 function Master_Optimizer_REO_V5_MC
-% =====================================================================
-%  Master_Optimizer_REO  —  VERSÃO 5 (V4 + MO-MCDE + MO-MC-SHADE)
-% =====================================================================
-%  O QUE MUDOU DA V4 PARA A V5 -----------------------------------------
-%  [NOVO] Duas técnicas multi-child de Evolução Diferencial, criadas como
-%         versões MULTIOBJETIVO dos algoritmos de Storn:
-%           - MO-MCDE     (base: Storn & Price, "Multi-Child DE – A Massively
-%                          Parallel Differential Evolution Algorithm",
-%                          IEEE CIES/SSCI 2025)
-%           - MO-MC-SHADE (base: Storn, "Comparison of MCDE and MC-SHADE for
-%                          Massively Parallel Optimization", IEEE CEC 2026)
-%         A "multiobjetivação" usa seleção por dominância de Pareto estilo
-%         GDE3 (Kukkonen & Lampinen, 2005) + repositório externo podado por
-%         crowding. Detalhes nos cabeçalhos de RunMO_MCDE e RunMO_MCSHADE.
-%  [NOVO] Modo HEADLESS para execução via "matlab -batch":
-%           - env HEADLESS=1  -> pula a GUI (usa defaults / env TECHS);
-%           - env KMAX=<n|inf> -> define K_MAX sem editar o arquivo;
-%           - env TECHS=MOPSO,NSGA2,... -> roda só as técnicas listadas;
-%           - plotagem desligada quando HEADLESS=1.
-%  [FIX]  Pool paralelo: parpool agora é limitado ao nº de núcleos e o
-%         parfeval ENFILEIRA o excedente (na V4, numSelected > núcleos
-%         derrubava o parpool — provável causa das ausências históricas de
-%         MOGA no caso base e SI-CDC nas rodadas K: 15 técnicas > 14 núcleos
-%         obrigavam a desmarcar uma técnica).
-% =====================================================================
-%  OBJETIVO
-%  Resolver, de forma comparativa, o problema BI-OBJETIVO de seleção de
-%  fornecedores para a produção de óxidos de terras raras (REO):
-%     minimizar  f1 = custo total   e   f2 = GWP total (kg CO2-eq).
-%  Cada material (linha das matrizes) recebe UM fornecedor (coluna).
-%  15 técnicas em 3 famílias rodam em paralelo e exportam suas frentes
-%  de Pareto para Excel.
+% Master_Optimizer_REO_V5_MC
 %
-%  O QUE MUDOU DA V3 PARA A V4 (resumo da revisão) -------------------
-%  [NOVO]   Restrição de CONSOLIDAÇÃO (Opção A): no máximo K fornecedores
-%           DISTINTOS em toda a cadeia (eq. |{x_1..x_M}| <= K). Quebra a
-%           separabilidade do problema e o torna NP-difícil (variante de
-%           p-medianas) — é o regime que JUSTIFICA as metaheurísticas.
-%           Implementada por:
-%             (a) operador de reparo ApplyK() chamado dentro de CostFunction
-%                 -> vale automaticamente para TODAS as 15 técnicas
-%                    ("reparo Baldwiniano": repara na avaliação);
-%             (b) RunMILP reformulada como p-medianas EXATO (intlinprog)
-%                 quando K está ativo -> baseline exato correto do problema
-%                 restrito (a versão original de atribuição vira o ramo
-%                 "sem restrição").
-%  [NOVO]   Exportação enriquecida: nº de fornecedores distintos por solução
-%           e a própria seleção (para a análise de "padrões de fornecedor"
-%           e para AUDITAR que a restrição foi respeitada).
-%  [NOVO]   dados.Cn / dados.Gn (matrizes normalizadas por material) usadas
-%           pelo reparo para escolher o melhor fornecedor remanescente.
-%  [MELHORIA SUGERIDA, comentada no código, NÃO ativada p/ preservar os
-%           resultados já validados]:
-%             - Limitação de velocidade (Vmax) em MOPSO/SI-CDC (evita
-%               explosão de velocidade com w inicial = 1,0);
-%             - DetermineDomination vetorizada (10-50x mais rápida; a
-%               versão O(n^2) original é o gargalo dos ~30-80 min de execução).
+% Benchmark comparativo do problema bi-objetivo de selecao de fornecedores para a
+% producao de oxidos de terras raras (REO): minimizar simultaneamente o custo
+% total (f1) e o GWP total, em kg CO2-eq (f2). Cada material recebe um fornecedor.
 %
-%  COMO DESLIGAR A RESTRIÇÃO: definir K_MAX = inf (ou K_MAX >= nVar). Nesse
-%  caso o código se comporta exatamente como a V3 (problema separável).
-%  COMO VARRER K (experimento do gráfico "custo da consolidação x K"):
-%  rodar o script alterando K_MAX para 2, 3, 5, 8, 13 e guardar cada Excel.
+% Tecnicas avaliadas, em tres familias: metaheuristicas (MOPSO, NSGA-II, MOGA,
+% MOEA/D e variantes, SI-CDC, MO-MCDE, MO-MC-SHADE), multicriterio (AHP, PROMETHEE,
+% ELECTRE) e exatas/deterministicas (MILP/p-medianas, branch-and-bound, relaxacao
+% lagrangiana, lexicografico).
 %
-%  Requisitos: Parallel Computing Toolbox (parpool/parfeval),
-%              Optimization Toolbox (intlinprog), Statistics Toolbox (pdist2).
-%  Arquivos de entrada (na pasta de trabalho): Custos.csv, GWP.csv.
-% =====================================================================
+% MO-MCDE e MO-MC-SHADE sao as versoes multiobjetivo dos algoritmos multi-child de
+% Storn (MCDE, IEEE CIES/SSCI 2025; MC-SHADE, IEEE CEC 2026), obtidas por selecao
+% por dominancia de Pareto no estilo GDE3 (Kukkonen & Lampinen, 2005), com
+% repositorio externo podado por distancia de aglomeracao.
+%
+% Restricao de consolidacao: no maximo K_MAX fornecedores distintos em toda a
+% cadeia; K_MAX = inf desativa a restricao (regime separavel). E aplicada por
+% operador de reparo na avaliacao, valendo uniformemente para todas as tecnicas.
+%
+% Entrada: Custos.csv e GWP.csv (13 materiais x 500 fornecedores) no diretorio corrente.
+% Saida  : Fronteira_Pareto_Global.xlsx, ou _K<K>.xlsx com a restricao ativa.
+%
+% Execucao sem interface (matlab -batch): variaveis de ambiente HEADLESS=1,
+% KMAX=<n|inf> e TECHS=<lista separada por virgula>.
 
 clc; clear; close all;
 
 %% 0. PARÂMETRO DA RESTRIÇÃO DE CONSOLIDAÇÃO  <<< AJUSTE AQUI >>>
-% K_MAX = nº máximo de fornecedores DISTINTOS permitido em toda a cadeia.
-% Motivo: cada fornecedor extra implica custo de qualificação, contrato,
-% auditoria e gestão; consolidar a base é exigência operacional realista e,
-% computacionalmente, acopla as decisões (torna o problema NP-difícil).
 K_MAX = inf;   % use inf (ou >=13) para DESLIGAR a restrição (= comportamento V3)
 % [V5] Sobrescrita por variável de ambiente (para varreduras via -batch):
-%      set KMAX=5 && matlab -batch Master_Optimizer_REO_V5_MC
 kEnv = getenv('KMAX');
 if ~isempty(kEnv)
     kNum = str2double(kEnv);
@@ -85,8 +38,6 @@ if ~isempty(kEnv)
 end
 
 %% 1. Carregamento dos Dados
-% Lê as matrizes de custo e GWP (materiais x fornecedores) dos CSVs e monta
-% a struct 'dados'. Em caso de erro de leitura, aborta com mensagem clara.
 fprintf('Lendo arquivos CSV...\n');
 try
     dados = Dados_Processo_REO();
@@ -99,8 +50,6 @@ catch ME
 end
 
 % Injeta o parâmetro de consolidação na struct para que CHEGUE A TODOS os
-% workers paralelos (dados é copiado para cada parfeval). Se K_MAX >= nVar,
-% a restrição é inócua (não há como usar mais fornecedores que materiais).
 dados.K = K_MAX;
 if dados.K < dados.nVar
     fprintf('Restricao de consolidacao ATIVA: no maximo K = %d fornecedores distintos (de %d materiais).\n', dados.K, dados.nVar);
@@ -109,9 +58,6 @@ else
 end
 
 %% 2. Interface Grafica e Parametros
-% GUI com checkboxes para escolher as técnicas e os parâmetros de cada uma.
-% Tem um timer de 15 s que inicia o "teste completo" (todas as técnicas) se
-% o usuário não interagir.
 [flags, params] = InterfaceSelecaoHeuristicas();
 
 % Conta quantas técnicas foram selecionadas (define o dimensionamento do pool).
@@ -128,9 +74,6 @@ if numSelected == 0
 end
 
 %% 3. Configuracao do Pool Paralelo Dinamico
-% Distribui os núcleos disponíveis entre as técnicas: cada técnica recebe
-% 'runsPerTech' execuções independentes (réplicas) para captar a
-% estocasticidade. totalWorkers = técnicas x réplicas.
 hwCores = feature('numcores');
 runsPerTech = max(1, floor(hwCores / numSelected));
 totalWorkers = numSelected * runsPerTech;
@@ -139,8 +82,6 @@ totalTasks = totalWorkers;
 fprintf('\nIniciando pool com %d workers (%d execucoes por tecnica baseando-se em %d nucleos detectados)...\n', totalWorkers, runsPerTech, hwCores);
 
 % [V5-FIX] O pool é limitado ao nº de núcleos físicos; o parfeval enfileira
-% as tarefas excedentes automaticamente (na V4, parpool(totalWorkers) com
-% totalWorkers > núcleos ERRAVA, forçando a desmarcar técnicas na mão).
 poolSize = min(totalWorkers, hwCores);
 pool = gcp('nocreate');
 if isempty(pool) || pool.NumWorkers ~= poolSize
@@ -149,13 +90,10 @@ if isempty(pool) || pool.NumWorkers ~= poolSize
 end
 
 % Fila de mensagens dos workers -> imprime progresso com timestamp [HH:MM:SS].
-% Motivo: parfeval não imprime direto no console; a DataQueue centraliza os logs.
 dq = parallel.pool.DataQueue;
 afterEach(dq, @(msg) fprintf('[%s] %s\n', datestr(now, 'HH:MM:SS'), msg));
 
 %% 4. Despacho das Tarefas Paralelas (parfeval)
-% Cada técnica selecionada é submetida como tarefa assíncrona (parfeval).
-% 'taskInfo' guarda nome e índice de cor para a plotagem/legenda.
 f = parallel.FevalFuture.empty;
 taskInfo = struct('Name', {}, 'ColorIdx', {});
 
@@ -219,10 +157,6 @@ if flags.LAGRANGIANA
 end
 
 %% 5. Coleta de Resultados, Plotagem e Exportacao Excel
-% Conforme cada tarefa termina (fetchNext), seus pontos (custo, GWP) são
-% plotados e acumulados para o Excel. NOVO: para cada solução também se
-% registra o nº de fornecedores distintos e a seleção, permitindo auditar
-% a restrição e analisar os padrões de escolha.
 cores = lines(17);
 % [V5] Plotagem desligada em modo headless (matlab -batch não tem display útil).
 doPlot = isempty(getenv('HEADLESS'));
@@ -271,9 +205,6 @@ for i = 1:totalTasks
                 xls_Tempo(end+1, 1) = tempo;
 
                 % NOVO: reconstrói a seleção de fornecedores da solução,
-                % aplicando a MESMA discretização+reparo da avaliação, para
-                % que a seleção reportada seja coerente com o custo/GWP
-                % (que já foram calculados sobre a versão reparada).
                 posSol = [];
                 if isfield(paretoResult(sol), 'Position') && ~isempty(paretoResult(sol).Position)
                     posSol = max(1, min(round(paretoResult(sol).Position), dados.nFornecedores));
@@ -315,7 +246,6 @@ end
 fprintf('\nTodas as otimizacoes foram concluidas.\n');
 
 % NOVO: relatório de viabilidade da restrição (sanity check). Se a restrição
-% está ativa, o nº máximo de fornecedores distintos observado DEVE ser <= K.
 if dados.K < dados.nVar
     if maxDistintosGlobal <= dados.K
         fprintf('Verificacao da restricao OK: max de fornecedores distintos = %d (<= K = %d).\n', maxDistintosGlobal, dados.K);
@@ -325,7 +255,6 @@ if dados.K < dados.nVar
 end
 
 % --- Gravação do Excel (nome do arquivo embute o K para não sobrescrever
-%     execuções de Ks diferentes — útil no experimento de varredura de K). ---
 if ~isempty(xls_Custo)
     T_Export = table(xls_Algoritmo, xls_Custo, xls_GWP, xls_Tempo, xls_NumForn, xls_Selecao, ...
         'VariableNames', {'Algoritmo', 'Custo_Total', 'Impacto_Ambiental', 'Tempo_Total_Segundos', 'Num_Fornecedores_Distintos', 'Selecao_Fornecedores'});
@@ -341,18 +270,9 @@ end
 
 end
 
-% =====================================================================
 %   INTERFACE GRAFICA & PARAMETROS (AJUSTADOS PARA TESTE COMPLETO)
-% =====================================================================
-% Define os hiperparâmetros de cada técnica e exibe checkboxes para
-% seleção. OBS (revisão): estes valores são os EFETIVAMENTE executados —
-% ao escrever a dissertação, alinhe o texto a eles (MaxIt=2000, nPop=500,
-% c1=c2=1,5, mu=0,5 para o MOPSO; etc.).
 function [flags, params] = InterfaceSelecaoHeuristicas()
     % --- Parâmetros das metaheurísticas ---
-    % MaxIt: nº de iterações; nPop: tamanho da população; nRep: tamanho do
-    % repositório externo (arquivo de não-dominados); w/wdamp: inércia e seu
-    % decaimento; c1/c2: coef. cognitivo/social; mu: controle da mutação.
     params.MOPSO = struct('MaxIt', 2000, 'nPop', 500, 'nRep', 500, 'w', 1.0, 'wdamp', 0.99, 'c1', 1.5, 'c2', 1.5, 'mu', 0.5);
     params.NSGA2 = struct('MaxIt', 2000, 'nPop', 500, 'pCrossover', 0.8, 'pMutation', 0.2);
     params.MOGA  = struct('MaxIt', 2000, 'nPop', 500, 'pCrossover', 0.8, 'pMutation', 0.2);
@@ -372,12 +292,6 @@ function [flags, params] = InterfaceSelecaoHeuristicas()
     params.LAGRANGIANA = struct('nPop', 500, 'MaxIt', 2000, 'step', 0.05);
 
     % --- [V5] Novas técnicas multi-child DE (multiobjetivo) ---
-    % Orçamento de avaliações IGUAL ao das demais metaheurísticas:
-    %   demais: MaxIt=2000 x nPop=500        = 1.000.000 avaliações
-    %   V5:     MaxIt= 500 x nPop=500 x M=4  = 1.000.000 avaliações
-    % (o "multi-child" troca gerações sequenciais por filhos paralelizáveis —
-    %  é exatamente a proposta do MCDE; ver cabeçalho de RunMO_MCDE.)
-    % F_L/F_U (dithering) e Cr do paper do CEC 2026; H = N/3 do MC-SHADE.
     params.MO_MCDE    = struct('MaxIt', 500, 'nPop', 500, 'M', 4, ...
                                'F_L', 0.3, 'F_U', 1.6, 'Cr', 0.85, 'nRep', 500);
     params.MO_MCSHADE = struct('MaxIt', 500, 'nPop', 500, 'M', 4, ...
@@ -391,8 +305,6 @@ function [flags, params] = InterfaceSelecaoHeuristicas()
     flags.MO_MCDE = 1; flags.MO_MCSHADE = 1;
 
     % --- [V5] Modo HEADLESS: pula a GUI por completo (p/ matlab -batch). ---
-    % env TECHS (opcional): lista separada por vírgula das técnicas a rodar,
-    % com os nomes dos campos de 'flags' (ex.: TECHS=MO_MCDE,MO_MCSHADE).
     if ~isempty(getenv('HEADLESS'))
         tsel = getenv('TECHS');
         if ~isempty(tsel)
@@ -482,17 +394,10 @@ function [flags, params] = InterfaceSelecaoHeuristicas()
     close(fig);
 end
 
-% =====================================================================
 %   MÓDULOS 1-8: METAHEURÍSTICAS
-%   (todas avaliam via CostFunction, logo TODAS já respeitam a restrição K
-%    pelo reparo Baldwiniano embutido em CostFunction.)
-% =====================================================================
 
 function [repValido, tempo_execucao] = RunMOPSO(dados, params, dq)
 % MOPSO — Multi-Objective Particle Swarm Optimization com GRADE ADAPTATIVA.
-% Mantém um repositório externo (rep) de soluções não-dominadas; o líder de
-% cada partícula é sorteado de regiões POUCO povoadas da grade (preserva
-% diversidade ao longo da frente). Mutação/turbulência evita ótimos locais.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar];
     % Estrutura de uma partícula (posição, velocidade, custo, melhor pessoal e índices de grade).
     empty.Position = []; empty.Velocity = []; empty.Cost = []; empty.Best.Position = []; empty.Best.Cost = []; empty.IsDominated = false; empty.GridIndex = []; empty.GridSubIndex = [];
@@ -511,8 +416,6 @@ function [repValido, tempo_execucao] = RunMOPSO(dados, params, dq)
             % Atualização clássica de velocidade: inércia + componente cognitivo + social.
             pop(i).Velocity = w_atual * pop(i).Velocity + params.c1 * rand(VarSize) .* (pop(i).Best.Position - pop(i).Position) + params.c2 * rand(VarSize) .* (leader.Position - pop(i).Position);
             % MELHORIA SUGERIDA (Vmax) — evita explosão de velocidade com w=1,0:
-            %   Vmax = 0.2*(VarMax-VarMin); pop(i).Velocity = max(min(pop(i).Velocity, Vmax), -Vmax);
-            % (desativada para não alterar os resultados já validados; ative se notar instabilidade)
             pop(i).Position = min(max(pop(i).Position + pop(i).Velocity, VarMin), VarMax); pop(i).Cost = CostFunction(pop(i).Position, dados);
             % Operador de mutação/turbulência (aceita por dominância).
             if rand < pm
@@ -528,7 +431,6 @@ function [repValido, tempo_execucao] = RunMOPSO(dados, params, dq)
         if k > 0, rep(repCount+1:repCount+k) = novos(1:k); repCount = repCount + k; end
         tmp = rep(1:repCount); tmp = DetermineDomination(tmp); tmp = tmp(~[tmp.IsDominated]); rep(1:numel(tmp)) = tmp; repCount = numel(tmp);
         % [CORRIGIDO] agora recebe 'rep' de volta — a poda por densidade de
-        % grade realmente altera o repositório (ver nota em DeleteOneRepMember).
         while repCount > params.nRep, [rep, repCount] = DeleteOneRepMember(rep, repCount, 2); end
         Grid = CreateGrid(rep, repCount, 7, 0.1); for i = 1:repCount, rep(i) = FindGridIndex(rep(i), Grid); end
         w_atual = w_atual * params.wdamp;   % decaimento da inércia
@@ -542,8 +444,6 @@ end
 
 function [repValido, tempo_execucao] = RunNSGA2(dados, params, dq)
 % NSGA-II — ordenação por não-dominância (fronts) + distância de aglomeração
-% (crowding) para diversidade. Seleção por torneio, cruzamento uniforme e
-% mutação; elitismo via combinação pais+filhos e truncamento por (rank, crowding).
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar];
     empty.Position = []; empty.Cost = []; empty.IsDominated = false; empty.Rank = []; empty.CrowdingDistance = []; pop = repmat(empty, params.nPop, 1);
     for i = 1:params.nPop, pop(i).Position = round(unifrnd(VarMin, VarMax, VarSize)); pop(i).Cost = CostFunction(pop(i).Position, dados); end
@@ -569,7 +469,6 @@ end
 
 function [repValido, tempo_execucao] = RunMOGA(dados, params, dq)
 % MOGA — algoritmo genético multiobjetivo com aptidão baseada no rank de
-% dominância (1/rank) e seleção por roleta; elitismo dos 10% melhores.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar];
     empty.Position = []; empty.Cost = []; empty.Rank = []; empty.Fitness = []; empty.IsDominated = false; pop = repmat(empty, params.nPop, 1);
     for i = 1:params.nPop, pop(i).Position = round(unifrnd(VarMin, VarMax, VarSize)); pop(i).Cost = CostFunction(pop(i).Position, dados); end
@@ -594,8 +493,6 @@ end
 
 function [repValido, tempo_execucao] = RunMOEAD(dados, params, dq)
 % MOEA/D — decomposição: N subproblemas escalares (pesos W) resolvidos
-% cooperativamente usando a VIZINHANÇA de pesos (T). z = ponto de referência
-% ideal; abordagem de Tchebycheff (max W.*|f - z|). EP = arquivo externo.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar]; nObj = 2; N = params.nPop; W = zeros(N, nObj);
     for i = 1:N, W(i, 1) = (i-1)/(N-1); W(i, 2) = 1 - W(i, 1); end; T = min(params.T, N); sp = struct('V', [], 'Neighbors', []); sp = repmat(sp, N, 1);
     % Vizinhança: os T pesos mais próximos (em distância euclidiana no espaço de pesos).
@@ -621,7 +518,6 @@ end
 
 function [repValido, tempo_execucao] = RunMOEAD_AV(dados, params, dq)
 % MOEA/D-AV — variante com população ADAPTATIVA (Adaptive Volume): N cresce
-% se o arquivo está rico e encolhe se está pobre, recalculando pesos/vizinhança.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar]; nObj = 2; N = params.nPopInit; W = zeros(N, nObj);
     for i = 1:N, W(i, 1) = (i-1)/(N-1); W(i, 2) = 1 - W(i, 1); end; T = min(params.T, N); sp = struct('V', [], 'Neighbors', []); sp = repmat(sp, N, 1);
     for i = 1:N, D = pdist2(W(i,:), W); [~, idx] = sort(D); sp(i).Neighbors = idx(1:T); end; empty_ind.Position = []; empty_ind.Cost = []; empty_ind.IsDominated = false; pop = repmat(empty_ind, N, 1); z = inf(nObj, 1);
@@ -651,8 +547,6 @@ end
 
 function [repValido, tempo_execucao] = RunMOEAD_PS(dados, params, dq)
 % MOEA/D-PS — variante com SELEÇÃO PARCIAL (Partial Update): a cada iteração
-% só uma fração dos subproblemas é atualizada (+ os extremos 1 e N),
-% reduzindo custo computacional por iteração.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar]; nObj = 2; N = params.nPop; n_update = max(1, round(N * params.nRatio)); W = zeros(N, nObj);
     for i = 1:N, W(i, 1) = (i-1)/(N-1); W(i, 2) = 1 - W(i, 1); end; T = min(params.T, N); sp = struct('V', [], 'Neighbors', []); sp = repmat(sp, N, 1);
     for i = 1:N, D = pdist2(W(i,:), W); [~, idx] = sort(D); sp(i).Neighbors = idx(1:T); end; empty_ind.Position = []; empty_ind.Cost = []; empty_ind.IsDominated = false; pop = repmat(empty_ind, N, 1); z = inf(nObj, 1);
@@ -677,8 +571,6 @@ end
 
 function [repValido, tempo_execucao] = RunMOEAD_STN(dados, params, dq)
 % MOEA/D-STN — variante que rastreia a TRAJETÓRIA (Search Trajectory Network)
-% do subproblema central, registrando como a solução central evolui (útil
-% para diagnóstico de convergência). A otimização em si segue o MOEA/D base.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar]; nObj = 2; N = params.nPop; W = zeros(N, nObj);
     for i = 1:N, W(i, 1) = (i-1)/(N-1); W(i, 2) = 1 - W(i, 1); end; T = min(params.T, N); sp = struct('V', [], 'Neighbors', []); sp = repmat(sp, N, 1);
     for i = 1:N, D = pdist2(W(i,:), W); [~, idx] = sort(D); sp(i).Neighbors = idx(1:T); end; empty_ind.Position = []; empty_ind.Cost = []; empty_ind.IsDominated = false; pop = repmat(empty_ind, N, 1); z = inf(nObj, 1);
@@ -701,8 +593,6 @@ end
 
 function [repValido, tempo_execucao] = RunSI_CDC(dados, params, dq)
 % SI-CDC — enxame simplificado (Swarm Intelligence) com líder sorteado do
-% arquivo externo EP e reflexão de velocidade nas bordas (rebote). Arquivo
-% limitado a nRep (poda aleatória se exceder).
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar];
     empty.Position = []; empty.Velocity = []; empty.Cost = []; empty.Best.Position = []; empty.Best.Cost = []; empty.IsDominated = false; pop = repmat(empty, params.nPop, 1);
     for i = 1:params.nPop, pop(i).Position = unifrnd(VarMin, VarMax, VarSize); pop(i).Velocity = zeros(VarSize); pop(i).Cost = CostFunction(pop(i).Position, dados); pop(i).Best = pop(i); end
@@ -712,7 +602,6 @@ function [repValido, tempo_execucao] = RunSI_CDC(dados, params, dq)
             if isempty(EP), leader = pop(randi(params.nPop)); else, leader = EP(randi(numel(EP))); end
             pop(i).Velocity = params.w * pop(i).Velocity + params.c1 * rand(VarSize) .* (pop(i).Best.Position - pop(i).Position) + params.c2 * rand(VarSize) .* (leader.Position - pop(i).Position); pop(i).Position = pop(i).Position + pop(i).Velocity;
             % MELHORIA SUGERIDA (Vmax): clampe a velocidade aqui, como no MOPSO.
-            % Tratamento de borda: clampa a posição e reflete (amortecida) a velocidade.
             for d = 1:nVar, if pop(i).Position(d) < VarMin || pop(i).Position(d) > VarMax, pop(i).Position(d) = max(VarMin, min(VarMax, pop(i).Position(d))); pop(i).Velocity(d) = -pop(i).Velocity(d) * 0.5; end; end
             pop(i).Cost = CostFunction(pop(i).Position, dados); if Dominates(pop(i).Cost, pop(i).Best.Cost), pop(i).Best = pop(i); else, if ~Dominates(pop(i).Best.Cost, pop(i).Cost) && rand < 0.5, pop(i).Best = pop(i); end; end
         end
@@ -726,19 +615,10 @@ function [repValido, tempo_execucao] = RunSI_CDC(dados, params, dq)
     tempo_execucao = toc(t0); repValido = EP;
 end
 
-% =====================================================================
 %   MÓDULOS 9-11: MCDM (Tomada de Decisão Multicritério)
-%   Constroem UMA solução por peso w1 (custo) / w2=1-w1 (GWP), escolhendo o
-%   fornecedor de cada material independentemente. OBS (revisão): por
-%   decidirem material a material, naturalmente usam muitos fornecedores;
-%   sob a restrição K, o reparo em CostFunction os torna viáveis, porém a
-%   escolha NÃO é ótima para o problema restrito (só o p-median MILP é).
-% =====================================================================
 
 function [repValido, tempo_execucao] = RunAHP(dados, params, dq)
 % AHP — prioridades por normalização do inverso (quanto menor custo/GWP,
-% maior a prioridade). Para cada peso, escolhe o fornecedor de maior
-% prioridade global por material.
     t0 = tic; nVar = dados.nVar; nFornecedores = dados.nFornecedores; empty.Position = zeros(1, nVar); empty.Cost = []; empty.IsDominated = false; pop = repmat(empty, params.nPop, 1);
     for it = 1:params.nPop
         w1 = (it - 1) / max(1, params.nPop - 1); w2 = 1 - w1; pos = zeros(1, nVar);
@@ -754,8 +634,6 @@ end
 
 function [repValido, tempo_execucao] = RunPROMETHEE(dados, params, dq)
 % PROMETHEE — fluxo líquido de preferência: para cada material, compara cada
-% fornecedor com todos os outros (preferência proporcional à diferença
-% normalizada) e escolhe o de maior fluxo Phi.
     t0 = tic; nVar = dados.nVar; nFornecedores = dados.nFornecedores; empty.Position = zeros(1, nVar); empty.Cost = []; empty.IsDominated = false; pop = repmat(empty, params.nPop, 1);
     for it = 1:params.nPop
         w1 = (it - 1) / max(1, params.nPop - 1); w2 = 1 - w1; pos = zeros(1, nVar);
@@ -778,7 +656,6 @@ end
 
 function [repValido, tempo_execucao] = RunELECTRE(dados, params, dq)
 % ELECTRE — concordância: para cada material, soma a concordância (pesos dos
-% critérios em que j é melhor) menos a do reverso, e escolhe o de maior score.
     t0 = tic; nVar = dados.nVar; nFornecedores = dados.nFornecedores; empty.Position = zeros(1, nVar); empty.Cost = []; empty.IsDominated = false; pop = repmat(empty, params.nPop, 1);
     for it = 1:params.nPop
         w1 = (it - 1) / max(1, params.nPop - 1); w2 = 1 - w1; pos = zeros(1, nVar);
@@ -799,14 +676,10 @@ function [repValido, tempo_execucao] = RunELECTRE(dados, params, dq)
     send(dq, sprintf('ELECTRE    : Processamento de %d cenarios concluido', params.nPop));
 end
 
-% =====================================================================
 %   MÓDULOS 12-15: EXATOS E DETERMINÍSTICOS
-% =====================================================================
 
 function [repValido, tempo_execucao] = RunLexicografico(dados, params, dq)
 % LEXICOGRÁFICO — otimização em duas fases: (1) minimiza o custo; (2) dentro
-% de uma tolerância de custo (Tolerancia), minimiza o GWP. Retorna a melhor
-% solução de compromisso encontrada.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar]; empty.Position = []; empty.Cost = []; empty.IsDominated = false; pop = repmat(empty, params.nPop, 1);
     for i = 1:params.nPop, pop(i).Position = round(unifrnd(VarMin, VarMax, VarSize)); pop(i).Cost = CostFunction(pop(i).Position, dados); end
     bestObj1 = inf; maxItPhase1 = floor(params.MaxIt / 2);
@@ -834,17 +707,6 @@ end
 
 function [repValido, tempo_execucao] = RunMILP(dados, params, dq)
 % MILP — Programação Linear Inteira Mista (intlinprog), varrendo pesos.
-%
-%  >>> REVISÃO/MELHORIA PRINCIPAL <<<
-%  Há DOIS ramos:
-%   (A) SE a restrição K está ativa -> resolve o p-MEDIANAS EXATO:
-%       escolhe <= K fornecedores (y_j) e atribui cada material ao melhor
-%       fornecedor ABERTO. Este é o baseline EXATO correto do problema
-%       RESTRITO (recupera apenas os pontos SUPORTADOS, pois usa soma
-%       ponderada; a frente restrita é não-convexa).
-%   (B) SENÃO -> MILP de ATRIBUIÇÃO original (problema separável/irrestrito):
-%       cada material escolhe seu melhor fornecedor (trivial).
-%  Variáveis no ramo (A): z_ij (material i -> fornecedor j) e y_j (forn. ativo).
     t0 = tic; nVar = dados.nVar; nFornecedores = dados.nFornecedores;
     temK = isfield(dados,'K') && ~isempty(dados.K) && dados.K < nVar;
     empty.Position = zeros(1, nVar); empty.Cost = []; empty.IsDominated = false;
@@ -864,7 +726,6 @@ function [repValido, tempo_execucao] = RunMILP(dados, params, dq)
         A = [A1; A2]; b = [zeros(nZ,1); dados.K];
         lb = zeros(numVars, 1); ub = ones(numVars, 1); intcon = (1:numVars)';
         % A frente restrita é não-convexa e tem POUCOS pontos suportados; não
-        % compensa resolver centenas de pesos. Limita-se a um número modesto.
         nW = min(params.nPop, 50); pop = repmat(empty, nW, 1);
         for it = 1:nW
             w1 = (it - 1) / max(1, nW - 1); w2 = 1 - w1;
@@ -906,10 +767,6 @@ end
 
 function [repValido, tempo_execucao] = RunBNB(dados, params, dq)
 % BRANCH AND BOUND (versão construtiva) — para cada peso, escolhe por material
-% o "ramo" (fornecedor) de menor custo ponderado. OBS (revisão): no problema
-% IRRESTRITO isto coincide com o ótimo (separável); sob a restrição K NÃO é
-% exato (o reparo em CostFunction garante viabilidade, mas não otimalidade).
-% Para um B&B exato do problema restrito, usar o p-medianas do RunMILP.
     t0 = tic; nVar = dados.nVar; nFornecedores = dados.nFornecedores; empty.Position = zeros(1, nVar); empty.Cost = []; empty.IsDominated = false; pop = repmat(empty, params.nPop, 1);
     for it = 1:params.nPop
         w1 = (it - 1) / max(1, params.nPop - 1); w2 = 1 - w1; pos = zeros(1, nVar);
@@ -925,11 +782,6 @@ end
 
 function [repValido, tempo_execucao] = RunLagrangiana(dados, params, dq)
 % RELAXAÇÃO LAGRANGIANA — para cada peso, resolve o subproblema relaxado por
-% material. OBS (revisão): como não há restrição acoplante no modelo base, o
-% gradiente subgradiente é nulo (grad=0) e o método reduz-se à escolha por
-% material (igual ao BNB). Sob a restrição K, seria o lugar natural para
-% DUALIZAR a restrição de cardinalidade (multiplicador penalizando abrir
-% fornecedores novos) — fica como extensão; aqui o reparo garante viabilidade.
     t0 = tic; nVar = dados.nVar; nFornecedores = dados.nFornecedores; empty.Position = zeros(1, nVar); empty.Cost = []; empty.IsDominated = false; pop = repmat(empty, params.nPop, 1);
     for it = 1:params.nPop
         w1 = (it - 1) / max(1, params.nPop - 1); w2 = 1 - w1; lambda = zeros(nVar, 1); step_size = params.step; best_pos = zeros(1, nVar);
@@ -946,17 +798,10 @@ function [repValido, tempo_execucao] = RunLagrangiana(dados, params, dq)
     if ~isempty(repValido), costs = round(horzcat(repValido.Cost)', 4); [~, uniqueIdx] = unique(costs, 'rows'); repValido = repValido(uniqueIdx); end; tempo_execucao = toc(t0);
 end
 
-% =====================================================================
 %   FUNCOES AUXILIARES DE CUSTO, RESTRIÇÃO E DOMINANCIA
-% =====================================================================
 
 function z = CostFunction(x, dados)
 % Avalia os dois objetivos de uma solução x (vetor de índices de fornecedor
-% por material). Passos:
-%   1) Discretiza x para inteiros válidos em [1, nForn] (PSO opera contínuo).
-%   2) [NOVO] Se a restrição K está ativa, REPARA para <= K fornecedores
-%      distintos (reparo Baldwiniano: vale para todas as técnicas).
-%   3) Soma o custo e o GWP do fornecedor escolhido de cada material.
     idx_fornecedores = max(1, min(round(x), dados.nFornecedores));
     if isfield(dados,'K') && ~isempty(dados.K) && dados.K < dados.nVar
         idx_fornecedores = ApplyK(idx_fornecedores, dados);
@@ -967,15 +812,7 @@ function z = CostFunction(x, dados)
 end
 
 function idx = ApplyK(idx, dados)
-% [NOVO] Operador de REPARO da restrição de consolidação: reduz o número de
 % fornecedores DISTINTOS em 'idx' para no máximo dados.K.
-% Heurística (gulosa e determinística):
-%   enquanto há mais de K fornecedores distintos:
-%     - identifica o fornecedor MENOS usado (candidato a ser eliminado);
-%     - reatribui cada material que o usava ao fornecedor REMANESCENTE de
-%       menor custo+GWP NORMALIZADOS para aquele material (Cn+Gn).
-% Motivo da normalização: custo (~10^2-10^3) e GWP (~10^0) têm escalas muito
-% diferentes; normalizar por material evita que o custo domine a reatribuição.
     K = dados.K;
     u = unique(idx);
     while numel(u) > K
@@ -990,16 +827,10 @@ function idx = ApplyK(idx, dados)
         u = unique(idx);
     end
     % NOTA: este é o reparo "Baldwiniano" (usado na AVALIAÇÃO). Para a variante
-    % "Lamarckiana" (escrever o reparo de volta no genótipo, melhor convergência),
-    % chamar ApplyK também após cada atualização de posição dentro das técnicas.
 end
 
 function dados = Dados_Processo_REO()
 % Lê Custos.csv e GWP.csv (formato: 1ª coluna = nome do material; demais =
-% fornecedores). Converte vírgula decimal para ponto, descarta linhas com
-% valores inválidos (NaN) e monta a struct 'dados'.
-% [NOVO] Calcula também Cn/Gn (matrizes normalizadas por material em [0,1]),
-% usadas pelo operador de reparo ApplyK.
     opts = detectImportOptions('Custos.csv'); opts.VariableNamingRule = 'preserve'; opts = setvartype(opts, opts.VariableNames(2:end), 'string'); tabCusto = readtable('Custos.csv', opts);
     if ~isfile('GWP.csv'), error('GWP.csv nao encontrado.'); end
     optsGWP = detectImportOptions('GWP.csv'); optsGWP.VariableNamingRule = 'preserve'; optsGWP = setvartype(optsGWP, optsGWP.VariableNames(2:end), 'string'); tabGWP = readtable('GWP.csv', optsGWP);
@@ -1016,14 +847,12 @@ end
 
 function b = Dominates(a, b_)
 % Dominância de Pareto (minimização): 'a' domina 'b_' se é <= em todos os
-% objetivos e < em pelo menos um. Aceita structs (usa .Cost) ou vetores.
     if isstruct(a), a = a.Cost; end; if isstruct(b_), b_ = b_.Cost; end
     b = all(all(a <= b_)) && any(any(a < b_));
 end
 
 function pop = DetermineDomination(pop)
 % Marca pop(i).IsDominated = true se existe alguma outra solução que o domina.
-% Complexidade O(n^2) com acesso a structs — é o principal gargalo de tempo.
     n = numel(pop); for i = 1:n, pop(i).IsDominated = false; end
     for i = 1:n-1
         for j = i+1:n
@@ -1032,33 +861,16 @@ function pop = DetermineDomination(pop)
         end
     end
 end
-% -------------------------------------------------------------------------
 % MELHORIA SUGERIDA (vetorizada, 10-50x mais rápida) — valide e, se desejar,
-% substitua a função acima por esta. Reduz drasticamente o tempo das
-% metaheurísticas (que chamam DetermineDomination a cada iteração).
-% function pop = DetermineDomination(pop)
-%     n = numel(pop); for i = 1:n, pop(i).IsDominated = false; end
-%     if n < 2, return; end
-%     Costs = horzcat(pop.Cost)';                 % n x nObj
-%     for i = 1:n
-%         le = all(Costs <= Costs(i,:), 2);       % outros <= i em todos os obj
-%         lt = any(Costs <  Costs(i,:), 2);       % outros <  i em algum obj
-%         dom = le & lt; dom(i) = false;
-%         if any(dom), pop(i).IsDominated = true; end
-%     end
-% end
-% -------------------------------------------------------------------------
 
 function pop = DetermineDominationCount(pop)
 % Atribui a cada solução um 'Rank' = 1 + nº de soluções que a dominam
-% (rank 1 = não-dominada). Usado pelo MOGA.
     n = numel(pop); for i = 1:n, pop(i).Rank = 1; end
     for i = 1:n, for j = 1:n, if i ~= j && Dominates(pop(j), pop(i)), pop(i).Rank = pop(i).Rank + 1; end; end; end
 end
 
 function pop = NonDominatedSort(pop)
 % Ordenação rápida por não-dominância (fast non-dominated sort do NSGA-II):
-% atribui pop(i).Rank = nº do front (1 = melhor). Base do elitismo do NSGA-II.
     n = numel(pop); domCount = zeros(n,1); dominatedSet = cell(n,1);
     for i = 1:n
         for j = i+1:n, if Dominates(pop(i), pop(j)), dominatedSet{i} = [dominatedSet{i}, j]; domCount(j) = domCount(j) + 1; elseif Dominates(pop(j), pop(i)), dominatedSet{j} = [dominatedSet{j}, i]; domCount(i) = domCount(i) + 1; end; end
@@ -1072,7 +884,6 @@ end
 
 function pop = CalcCrowdingDistance(pop)
 % Distância de aglomeração (crowding) por front: mede o "espaço" ao redor de
-% cada solução; extremos recebem inf. Preserva diversidade no NSGA-II.
     n = numel(pop); nObj = numel(pop(1).Cost); for i = 1:n, pop(i).CrowdingDistance = 0; end; maxRank = max([pop.Rank]);
     for r = 1:maxRank
         F = find([pop.Rank] == r); l = numel(F); if l == 0, continue; end
@@ -1088,20 +899,17 @@ end
 
 function popNew = SortAndTruncateNSGA2(pop, nPop)
 % Seleção ambiental do NSGA-II: ordena por (Rank crescente, Crowding
-% decrescente) e mantém os nPop melhores.
     ranks = [pop.Rank]; cds = [pop.CrowdingDistance]; [~, order] = sortrows([ranks', -cds']); popNew = pop(order(1:nPop));
 end
 
 function idx = TournamentSelection(pop)
 % Torneio binário: sorteia 2 indivíduos e vence o de menor rank (desempate
-% pela maior distância de aglomeração).
     n = numel(pop); i1 = randi(n); i2 = randi(n);
     if pop(i1).Rank < pop(i2).Rank, idx = i1; elseif pop(i2).Rank < pop(i1).Rank, idx = i2; else, if pop(i1).CrowdingDistance > pop(i2).CrowdingDistance, idx = i1; else, idx = i2; end; end
 end
 
 function xnew = Mutate(x, pm, VarMin, VarMax)
 % Mutação: perturba UMA variável aleatória dentro de uma janela proporcional
-% a pm (amplitude da perturbação). Mantém a solução no domínio.
     j = randi(numel(x)); dx = pm*(VarMax-VarMin); lb = max(VarMin, x(j)-dx); ub = min(VarMax, x(j)+dx); xnew = x; xnew(j) = unifrnd(lb, ub);
 end
 
@@ -1112,7 +920,6 @@ end
 
 function part = FindGridIndex(part, Grid)
 % Mapeia uma solução do repositório para uma célula da grade adaptativa
-% (índice de hipercubo no espaço de objetivos). Usado pelo MOPSO.
     nObj = numel(part.Cost); nGrid = numel(Grid(1).LB); part.GridSubIndex = zeros(1, nObj);
     for j = 1:nObj, val = part.Cost(j); if isnan(val), idx = nGrid; else, idx = find(val < Grid(j).UB, 1, 'first'); if isempty(idx), idx = numel(Grid(j).UB); end; end; part.GridSubIndex(j) = idx; end
     part.GridIndex = part.GridSubIndex(1); for j = 2:nObj, part.GridIndex = nGrid*(part.GridIndex-1) + part.GridSubIndex(j); end
@@ -1120,8 +927,6 @@ end
 
 function leader = SelectLeader(rep, repCount, beta)
 % Seleciona o líder global do MOPSO: células MENOS povoadas têm MAIOR
-% probabilidade (P ~ exp(-beta*N)), empurrando o enxame para regiões esparsas
-% da frente (promove diversidade/cobertura).
     GI = [rep(1:repCount).GridIndex]; OC = unique(GI); N = zeros(size(OC)); for k = 1:numel(OC), N(k) = sum(GI == OC(k)); end
     P = exp(-beta*N); P = P./sum(P); sci = RouletteWheelSelection(P); if isempty(sci), sci = randi(numel(OC)); end
     sc = OC(sci); SCM = find(GI == sc); leader = rep(SCM(randi(numel(SCM))));
@@ -1129,17 +934,6 @@ end
 
 function [rep, repCount] = DeleteOneRepMember(rep, repCount, gamma)
 % Poda do repositório quando excede a capacidade: células MAIS povoadas têm
-% MAIOR probabilidade de perder um membro (P ~ exp(gamma*(N-max))), mantendo
-% a frente uniforme.
-%
-% [BUG CORRIGIDO NA V4] Na V3 a assinatura era "function repCount = ...": como
-% o MATLAB passa arrays POR VALOR, a remoção "rep(remIdx) = rep(repCount)" era
-% feita numa CÓPIA local e PERDIDA ao retornar (só repCount voltava). O efeito
-% real era apenas truncar o último elemento — a poda por densidade de grade
-% descrita na metodologia (Seção 3.1.4.3) NÃO acontecia. Agora 'rep' também é
-% retornado, fazendo a poda funcionar como documentado.
-% Para reproduzir EXATAMENTE o comportamento da V3, reverta a assinatura para
-% "function repCount = ..." e o chamador no MOPSO para "repCount = DeleteOne...".
     GI = [rep(1:repCount).GridIndex]; OC = unique(GI); N = zeros(size(OC)); for k = 1:numel(OC), N(k) = sum(GI == OC(k)); end
     P = exp(gamma*(N-max(N))); P = P./sum(P); sci = RouletteWheelSelection(P); if isempty(sci), sci = randi(numel(OC)); end
     sc = OC(sci); SCM = find(GI == sc); remIdx = SCM(randi(numel(SCM)));
@@ -1149,8 +943,6 @@ end
 
 function Grid = CreateGrid(pop, repCount, nGrid, alpha)
 % Cria a grade adaptativa no espaço de objetivos: divide cada eixo em nGrid
-% faixas, com folga 'alpha' nas bordas. Recalculada a cada iteração conforme
-% a frente evolui (por isso "adaptativa").
     if repCount == 0, Grid = repmat(struct('LB', [-inf 0], 'UB', [0 inf]), 2, 1); return; end
     nObj = numel(pop(1).Cost); c = reshape([pop(1:repCount).Cost], nObj, []); c(isnan(c)) = max(c(~isnan(c)));
     cmin = min(c, [], 2); cmax = max(c, [], 2); dc = cmax-cmin; cmin = cmin-alpha*dc; cmax = cmax+alpha*dc;
@@ -1158,39 +950,10 @@ function Grid = CreateGrid(pop, repCount, nGrid, alpha)
     for j = 1:nObj, cj = linspace(cmin(j), cmax(j), nGrid+1); Grid(j).LB = [-inf cj]; Grid(j).UB = [cj +inf]; end
 end
 
-% =====================================================================
 %   [V5] MÃ“DULOS 16-17: MULTI-CHILD DIFFERENTIAL EVOLUTION MULTIOBJETIVO
-%   Fontes dos nÃºcleos mono-objetivo:
-%     [MCDE]     Storn & Price, "Multi-Child DE â€” A Massively Parallel
-%                Differential Evolution Algorithm", IEEE CIES/SSCI 2025.
-%     [MC-SHADE] Storn, "Comparison of MCDE and MC-SHADE for Massively
-%                Parallel Optimization", IEEE CEC 2026 (eqs. 1-14).
-%   AdaptaÃ§Ã£o multiobjetivo (contribuiÃ§Ã£o desta dissertaÃ§Ã£o):
-%     - a prÃ©-seleÃ§Ã£o (argmin f) e a seleÃ§Ã£o final (f(w)<=f(x)) do original
-%       sÃ£o substituÃ­das por regras de DOMINÃ‚NCIA DE PARETO no estilo GDE3
-%       (Kukkonen & Lampinen, CEC 2005): campeÃ£o que domina o pai substitui;
-%       mutuamente nÃ£o-dominados vÃ£o para um pool e a populaÃ§Ã£o volta a nPop
-%       por seleÃ§Ã£o ambiental NSGA-II (rank + crowding), reutilizando os
-%       helpers NonDominatedSort/CalcCrowdingDistance/SortAndTruncateNSGA2;
-%     - repositÃ³rio externo de nÃ£o-dominados com capacidade nRep, podado
-%       por crowding (Ã© a frente devolvida â€” mesma convenÃ§Ã£o do harness);
-%     - no MO-MC-SHADE, o "sucesso" da adaptaÃ§Ã£o de F/Cr passa a ser
-%       "campeÃ£o DOMINA o pai" e o peso delta_i da regra de Peng (eq. 11)
-%       vira a norma da melhoria NORMALIZADA pela faixa corrente dos
-%       objetivos na populaÃ§Ã£o (substituto vetorial de |f(w)-f(x)|).
-%   As avaliaÃ§Ãµes continuam via CostFunction => a restriÃ§Ã£o K (reparo
-%   Baldwiniano) vale automaticamente, como nas demais tÃ©cnicas.
-% =====================================================================
 
 function [repValido, tempo_execucao] = RunMO_MCDE(dados, params, dq)
 % MO-MCDE â€” Multi-Child DE multiobjetivo.
-% NÃºcleo MCDE preservado (eqs. 1-5 do paper CEC 2026):
-%   - mutaÃ§Ã£o DE/rand/1 com r0/r1/r2 SORTEADOS POR FILHO;
-%   - dithering de F por competiÃ§Ã£o pai-filhos (eq. 2):
-%       F_i = F_L + rand*(F_U - F_L), F_L=0,3, F_U=1,6;
-%   - crossover binomial com Cr fixo (0,85) e j_rand (eq. 3);
-%   - M filhos por pai; prÃ©-seleÃ§Ã£o -> campeÃ£o w_i (eq. 4);
-%   - seleÃ§Ã£o final pai x campeÃ£o (eq. 5), aqui por dominÃ¢ncia.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar];
     N = params.nPop; M = params.M;
     empty.Position = []; empty.Cost = []; empty.IsDominated = false; empty.Rank = []; empty.CrowdingDistance = [];
@@ -1226,7 +989,6 @@ function [repValido, tempo_execucao] = RunMO_MCDE(dados, params, dq)
         pool_ = NonDominatedSort(pool_); pool_ = CalcCrowdingDistance(pool_);
         pop = SortAndTruncateNSGA2(pool_, N);
         % repositÃ³rio: basta inserir os rank-1 da geraÃ§Ã£o (os demais seriam
-        % filtrados de qualquer forma dentro de UpdateRepositorio)
         rep = UpdateRepositorio(rep, pool_([pool_.Rank] == 1), params.nRep);
         if mod(it, 50) == 0 || it == params.MaxIt
             send(dq, sprintf('MO-MCDE    : Iter %4d / %d concluida (rep = %d)', it, params.MaxIt, numel(rep)));
@@ -1237,21 +999,6 @@ end
 
 function [repValido, tempo_execucao] = RunMO_MCSHADE(dados, params, dq)
 % MO-MC-SHADE â€” Multi-Child SHADE multiobjetivo.
-% NÃºcleo MC-SHADE preservado (eqs. 6-14 do paper CEC 2026):
-%   - mutaÃ§Ã£o DE/current-to-pbest (eq. 6): v = x_i + F*(x_pbest - x_i + x_r1 - x_r2),
-%     com x_pbest sorteado entre os p melhores da geraÃ§Ã£o anterior,
-%     p ~ U{2, floor(0,2N)}, mantido para os M filhos do mesmo pai;
-%   - Cr_i ~ Normal(mu_Cr, 0,1) e F_i ~ Cauchy(mu_F, 0,1) POR COMPETIÃ‡ÃƒO (eq. 8);
-%   - buffer circular de tamanho H = N/3 (anel), inicializado em 0,5; a cada
-%     geraÃ§Ã£o um slot aleatÃ³rio fornece (mu_Cr, mu_F) e o slot corrente do
-%     anel recebe a atualizaÃ§Ã£o:
-%       mu_Cr novo = mu_Cr*(1-c) + c * [mÃ©dia aritmÃ©tica de Cr ponderada por delta] (eqs. 9-10)
-%       mu_F  novo = mu_F *(1-c) + c * [mÃ©dia de Lehmer quadrÃ¡tica dos F de sucesso] (eqs. 12-13)
-%     com c = 0,1 e delta_i pela regra de Peng (eq. 11);
-%   - SEM archive externo de derrotados (fiel ao MC-SHADE original);
-%   - tratamento de borda padrÃ£o SHADE: ponto mÃ©dio entre o limite e o pai.
-% AdaptaÃ§Ã£o multiobjetivo: "p melhores" = ordenaÃ§Ã£o (rank, crowding);
-% sucesso = campeÃ£o domina o pai; delta_i = norma da melhoria normalizada.
     t0 = tic; nVar = dados.nVar; VarMin = 1; VarMax = dados.nFornecedores; VarSize = [1 nVar];
     N = params.nPop; M = params.M; H = max(2, params.H); c = params.c;
     empty.Position = []; empty.Cost = []; empty.IsDominated = false; empty.Rank = []; empty.CrowdingDistance = [];
@@ -1315,16 +1062,10 @@ function [repValido, tempo_execucao] = RunMO_MCSHADE(dados, params, dq)
     tempo_execucao = toc(t0); repValido = rep;
 end
 
-% ---------------------------------------------------------------------
 %  Helpers das tÃ©cnicas multi-child (V5)
-% ---------------------------------------------------------------------
 
 function w = PreSelecaoMO(filhos, pai)
 % PrÃ©-seleÃ§Ã£o multiobjetivo do multi-child: devolve UM campeÃ£o entre os M
-% filhos (equivalente Pareto do argmin da eq. 4):
-%   1) se algum filho DOMINA o pai, sorteia entre os que dominam o pai e
-%      sÃ£o nÃ£o-dominados entre si (maior pressÃ£o seletiva rumo Ã  frente);
-%   2) senÃ£o, sorteia entre os filhos nÃ£o-dominados entre si.
     Mloc = numel(filhos);
     domPai = false(Mloc, 1);
     for m = 1:Mloc, domPai(m) = Dominates(filhos(m).Cost, pai.Cost); end
@@ -1354,10 +1095,6 @@ end
 
 function rep = UpdateRepositorio(rep, novos, nRep)
 % RepositÃ³rio externo de nÃ£o-dominados (a frente devolvida no final):
-% junta, refiltra por dominÃ¢ncia, deduplica em (custo, GWP) e, se exceder a
-% capacidade, poda os de MENOR crowding (preserva cobertura da frente).
-% Poda determinÃ­stica por crowding â€” anÃ¡loga em intenÃ§Ã£o Ã  poda por grade do
-% MOPSO, reutilizando CalcCrowdingDistance.
     rep = [rep; novos];
     if isempty(rep), return; end
     rep = DetermineDomination(rep); rep = rep(~[rep.IsDominated]);

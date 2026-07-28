@@ -7,8 +7,10 @@ abstract: >-
   rare-earth-oxide production, in both an unconstrained (separable) and a
   consolidation-constrained (NP-hard, p-median) regime. Includes a benchmark of
   metaheuristic, multi-criteria and exact techniques against the exact Pareto front,
-  plus multi-child differential evolution (MO-MCDE, MO-MC-SHADE) and Bayesian
-  algorithm configuration (MO-SMAC) adapted to the multi-objective setting.
+  multi-child differential evolution in multi-objective form (MO-MCDE, MO-MC-SHADE)
+  and multi-objective Bayesian algorithm configuration (MO-SMAC), and a statistical
+  validation study of 30 independent runs per technique for K in {2, 5, 13}
+  (Friedman and paired Wilcoxon tests with Holm-Bonferroni correction).
 type: dataset
 authors:
   - family-names: "Crepaldi da Silva"
